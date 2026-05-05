@@ -1,0 +1,29 @@
+{
+  "name": "barrel-proxy",
+  "version": "0.1.0",
+  "description": "A zero-config reverse proxy with live-reload support for local multi-service development.",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "barrel": "./bin/barrel.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "proxy",
+    "reverse-proxy",
+    "dev-server",
+    "live-reload",
+    "local-development"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "http-proxy": "^1.18.1"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0"
+  }
+}

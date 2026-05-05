@@ -1,0 +1,23 @@
+{
+  "port": 3000,
+  "host": "localhost",
+  "services": [
+    {
+      "prefix": "/api",
+      "target": "http://localhost:4000",
+      "label": "API Service",
+      "ws": true
+    },
+    {
+      "prefix": "/auth",
+      "target": "http://localhost:4001",
+      "label": "Auth Service"
+    },
+    {
+      "prefix": "/",
+      "target": "http://localhost:5173",
+      "label": "Frontend (Vite)",
+      "ws": true
+    }
+  ]
+}
