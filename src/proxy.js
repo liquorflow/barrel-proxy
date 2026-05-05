@@ -1,69 +1,53 @@
 const http = require('http');
 const httpProxy = require('http-proxy');
+const { createLogger } = require('./logger');
 
-function createProxy() {
-  return httpProxy.createProxyServer({ changeOrigin: true });
+const log = createLogger('proxy');
+
+function matchService(services, hostname) {
+  const host = (hostname || '').split(':')[0];
+  return services.find((svc) => {
+    if (svc.hostname) return svc.hostname === host;
+    return false;
+  }) || services.find((svc) => svc.default) || null;
 }
 
-function matchService(services, req) {
-  const host = req.headers.host || '';
-  const hostname = host.split(':')[0];
-
-  for (const service of services) {
-    if (service.host && hostname === service.host) {
-      return service;
-    }
-  }
-
-  for (const service of services) {
-    if (service.path && req.url.startsWith(service.path)) {
-      return service;
-    }
-  }
-
-  return null;
-}
-
-function createServer(config) {
-  const proxy = createProxy();
-  const { services, port = 3000 } = config;
+function createProxy(services) {
+  const proxy = httpProxy.createProxyServer({ changeOrigin: true });
 
   proxy.on('error', (err, req, res) => {
-    console.error(`[barrel] proxy error: ${err.message}`);
+    log.error(`Proxy error for ${req.url}: ${err.message}`);
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'text/plain' });
     }
     res.end('Bad Gateway');
   });
 
-  const server = http.createServer((req, res) => {
-    const service = matchService(services, req);
-
-    if (!service) {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('No matching service found');
-      return;
-    }
-
-    const target = `http://${service.target}`;
-    console.log(`[barrel] ${req.method} ${req.url} -> ${target}`);
-    proxy.web(req, res, { target });
-  });
-
-  return {
-    start() {
-      server.listen(port, () => {
-        console.log(`[barrel] proxy listening on http://localhost:${port}`);
-      });
-      return server;
-    },
-    stop() {
-      server.close();
-      proxy.close();
-    },
-    server,
-    proxy,
-  };
+  return proxy;
 }
 
-module.exports = { createServer, matchService, createProxy };
+function createServer(config) {
+  const { services } = config;
+  const proxy = createProxy(services);
+
+  const server = http.createServer((req, res) => {
+    const svc = matchService(services, req.headers.host);
+    if (!svc) {
+      log.warn(`No service matched for host: ${req.headers.host}`);
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('No matching service');
+      return;
+    }
+    log.debug(`Routing ${req.headers.host}${req.url} -> ${svc.target}`);
+    proxy.web(req, res, { target: svc.target });
+  });
+
+  server.on('upgrade', (req, socket, head) => {
+    const svc = matchService(services, req.headers.host);
+    if (svc) proxy.ws(req, socket, head, { target: svc.target });
+  });
+
+  return server;
+}
+
+module.exports = { createProxy, matchService, createServer };
