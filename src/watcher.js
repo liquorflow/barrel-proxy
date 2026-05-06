@@ -26,6 +26,10 @@ class FileWatcher extends EventEmitter {
   }
 
   start() {
+    if (this.watcher) {
+      return this;
+    }
+
     const ignored = [...DEFAULT_IGNORED, ...(this.options.ignored || [])];
     this.watcher = chokidar.watch(this.paths, {
       ...DEFAULT_OPTIONS,
@@ -55,6 +59,10 @@ class FileWatcher extends EventEmitter {
       this.watcher.close();
       this.watcher = null;
     }
+  }
+
+  isRunning() {
+    return this.watcher !== null;
   }
 }
 
