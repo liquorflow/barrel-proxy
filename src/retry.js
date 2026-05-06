@@ -1,53 +1,49 @@
-"use strict";
+const { EventEmitter } = require('events');
 
-const { EventEmitter } = require("events");
+const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_DELAY = 200;
 
-const DEFAULT_OPTIONS = {
-  maxAttempts: 3,
-  initialDelay: 100,
-  maxDelay: 2000,
-  backoffFactor: 2,
-  retryOn: [502, 503, 504],
-};
+function defaultShouldRetry(error) {
+  return (
+    error.code === 'ECONNREFUSED' ||
+    error.code === 'ECONNRESET' ||
+    error.code === 'ETIMEDOUT'
+  );
+}
 
 class RetryHandler extends EventEmitter {
   constructor(options = {}) {
     super();
-    this.options = { ...DEFAULT_OPTIONS, ...options };
-    this.attempts = new Map();
+    this.maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+    this.delay = options.delay ?? DEFAULT_DELAY;
+    this.shouldRetry = options.shouldRetry ?? defaultShouldRetry;
   }
 
-  shouldRetry(statusCode) {
-    return this.options.retryOn.includes(statusCode);
+  getConfig() {
+    return { maxAttempts: this.maxAttempts, delay: this.delay };
   }
 
-  getDelay(attempt) {
-    const delay =
-      this.options.initialDelay *
-      Math.pow(this.options.backoffFactor, attempt - 1);
-    return Math.min(delay, this.options.maxDelay);
+  async execute(fn) {
+    let lastError;
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+      try {
+        return await fn(attempt);
+      } catch (err) {
+        lastError = err;
+        if (attempt < this.maxAttempts && this.shouldRetry(err)) {
+          this.emit('retry', { attempt, error: err });
+          await this._wait(this.delay * attempt);
+        } else {
+          break;
+        }
+      }
+    }
+    this.emit('exhausted', { error: lastError, maxAttempts: this.maxAttempts });
+    throw lastError;
   }
 
-  getAttempts(requestId) {
-    return this.attempts.get(requestId) || 0;
-  }
-
-  increment(requestId) {
-    const current = this.getAttempts(requestId);
-    this.attempts.set(requestId, current + 1);
-    return current + 1;
-  }
-
-  canRetry(requestId) {
-    return this.getAttempts(requestId) < this.options.maxAttempts;
-  }
-
-  clear(requestId) {
-    this.attempts.delete(requestId);
-  }
-
-  reset() {
-    this.attempts.clear();
+  _wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 
@@ -55,4 +51,4 @@ function createRetryHandler(options = {}) {
   return new RetryHandler(options);
 }
 
-module.exports = { RetryHandler, createRetryHandler, DEFAULT_OPTIONS };
+module.exports = { RetryHandler, createRetryHandler };

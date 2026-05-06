@@ -1,75 +1,76 @@
-"use strict";
+const { RetryHandler, createRetryHandler } = require('./retry');
 
-const { RetryHandler, createRetryHandler, DEFAULT_OPTIONS } = require("./retry");
+function makeError(code) {
+  const err = new Error(code);
+  err.code = code;
+  return err;
+}
 
-describe("RetryHandler", () => {
-  let handler;
+test('createRetryHandler returns RetryHandler instance', () => {
+  const handler = createRetryHandler();
+  expect(handler).toBeInstanceOf(RetryHandler);
+});
 
-  beforeEach(() => {
-    handler = createRetryHandler();
+test('getConfig returns maxAttempts and delay', () => {
+  const handler = createRetryHandler({ maxAttempts: 5, delay: 100 });
+  expect(handler.getConfig()).toEqual({ maxAttempts: 5, delay: 100 });
+});
+
+test('execute resolves immediately on success', async () => {
+  const handler = createRetryHandler({ delay: 0 });
+  const result = await handler.execute(async () => 'ok');
+  expect(result).toBe('ok');
+});
+
+test('execute retries on retryable error and eventually succeeds', async () => {
+  const handler = createRetryHandler({ maxAttempts: 3, delay: 0 });
+  let calls = 0;
+  const retries = [];
+  handler.on('retry', ({ attempt }) => retries.push(attempt));
+  const result = await handler.execute(async () => {
+    calls++;
+    if (calls < 3) throw makeError('ECONNREFUSED');
+    return 'done';
   });
+  expect(result).toBe('done');
+  expect(calls).toBe(3);
+  expect(retries).toEqual([1, 2]);
+});
 
-  test("uses default options", () => {
-    expect(handler.options.maxAttempts).toBe(DEFAULT_OPTIONS.maxAttempts);
-    expect(handler.options.initialDelay).toBe(DEFAULT_OPTIONS.initialDelay);
-    expect(handler.options.retryOn).toEqual(DEFAULT_OPTIONS.retryOn);
-  });
+test('execute throws after exhausting attempts', async () => {
+  const handler = createRetryHandler({ maxAttempts: 2, delay: 0 });
+  let exhausted = false;
+  handler.on('exhausted', () => { exhausted = true; });
+  await expect(
+    handler.execute(async () => { throw makeError('ECONNRESET'); })
+  ).rejects.toMatchObject({ code: 'ECONNRESET' });
+  expect(exhausted).toBe(true);
+});
 
-  test("merges custom options with defaults", () => {
-    const h = createRetryHandler({ maxAttempts: 5, initialDelay: 50 });
-    expect(h.options.maxAttempts).toBe(5);
-    expect(h.options.initialDelay).toBe(50);
-    expect(h.options.backoffFactor).toBe(DEFAULT_OPTIONS.backoffFactor);
-  });
+test('execute does not retry non-retryable errors', async () => {
+  const handler = createRetryHandler({ maxAttempts: 3, delay: 0 });
+  let calls = 0;
+  await expect(
+    handler.execute(async () => {
+      calls++;
+      throw makeError('ENOENT');
+    })
+  ).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(calls).toBe(1);
+});
 
-  test("shouldRetry returns true for configured status codes", () => {
-    expect(handler.shouldRetry(502)).toBe(true);
-    expect(handler.shouldRetry(503)).toBe(true);
-    expect(handler.shouldRetry(504)).toBe(true);
+test('execute uses custom shouldRetry predicate', async () => {
+  const handler = createRetryHandler({
+    maxAttempts: 3,
+    delay: 0,
+    shouldRetry: (err) => err.code === 'CUSTOM',
   });
-
-  test("shouldRetry returns false for non-retry status codes", () => {
-    expect(handler.shouldRetry(200)).toBe(false);
-    expect(handler.shouldRetry(404)).toBe(false);
-    expect(handler.shouldRetry(500)).toBe(false);
+  let calls = 0;
+  const result = await handler.execute(async () => {
+    calls++;
+    if (calls < 2) throw makeError('CUSTOM');
+    return 'custom-ok';
   });
-
-  test("getDelay applies exponential backoff", () => {
-    expect(handler.getDelay(1)).toBe(100);
-    expect(handler.getDelay(2)).toBe(200);
-    expect(handler.getDelay(3)).toBe(400);
-  });
-
-  test("getDelay does not exceed maxDelay", () => {
-    expect(handler.getDelay(100)).toBe(handler.options.maxDelay);
-  });
-
-  test("increment tracks attempts per requestId", () => {
-    expect(handler.getAttempts("req-1")).toBe(0);
-    handler.increment("req-1");
-    expect(handler.getAttempts("req-1")).toBe(1);
-    handler.increment("req-1");
-    expect(handler.getAttempts("req-1")).toBe(2);
-  });
-
-  test("canRetry returns false when maxAttempts reached", () => {
-    handler.increment("req-2");
-    handler.increment("req-2");
-    handler.increment("req-2");
-    expect(handler.canRetry("req-2")).toBe(false);
-  });
-
-  test("clear removes attempt tracking for a request", () => {
-    handler.increment("req-3");
-    handler.clear("req-3");
-    expect(handler.getAttempts("req-3")).toBe(0);
-  });
-
-  test("reset clears all tracked attempts", () => {
-    handler.increment("req-4");
-    handler.increment("req-5");
-    handler.reset();
-    expect(handler.getAttempts("req-4")).toBe(0);
-    expect(handler.getAttempts("req-5")).toBe(0);
-  });
+  expect(result).toBe('custom-ok');
+  expect(calls).toBe(2);
 });
