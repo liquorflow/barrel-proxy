@@ -1,43 +1,52 @@
 const { EventEmitter } = require('events');
 
 class RateLimiter extends EventEmitter {
-  constructor({ windowMs = 60000, max = 100 } = {}) {
+  constructor(options = {}) {
     super();
-    this.windowMs = windowMs;
-    this.max = max;
-    this.buckets = new Map();
+    this.windowMs = options.windowMs || 60000;
+    this.max = options.max || 100;
+    this.store = new Map();
   }
 
-  _cleanup(key) {
+  check(key) {
     const now = Date.now();
-    const bucket = this.buckets.get(key);
-    if (!bucket) return;
-    bucket.requests = bucket.requests.filter(t => now - t < this.windowMs);
-    if (bucket.requests.length === 0) this.buckets.delete(key);
-  }
+    let entry = this.store.get(key);
 
-  hit(key) {
-    this._cleanup(key);
-    const now = Date.now();
-    if (!this.buckets.has(key)) {
-      this.buckets.set(key, { requests: [] });
+    if (!entry || now > entry.resetAt) {
+      entry = { count: 0, resetAt: now + this.windowMs };
+      this.store.set(key, entry);
     }
-    const bucket = this.buckets.get(key);
-    bucket.requests.push(now);
-    const count = bucket.requests.length;
-    const allowed = count <= this.max;
+
+    entry.count += 1;
+    const allowed = entry.count <= this.max;
+    const remaining = Math.max(0, this.max - entry.count);
+
     if (!allowed) {
-      this.emit('limited', { key, count });
+      this.emit('exceeded', { key, count: entry.count });
     }
-    return { allowed, count, remaining: Math.max(0, this.max - count) };
+
+    return {
+      allowed,
+      remaining,
+      resetAt: entry.resetAt,
+      retryAfter: Math.ceil((entry.resetAt - now) / 1000)
+    };
+  }
+
+  getStats() {
+    const stats = {};
+    for (const [key, entry] of this.store.entries()) {
+      stats[key] = { count: entry.count, resetAt: entry.resetAt };
+    }
+    return stats;
   }
 
   reset(key) {
-    this.buckets.delete(key);
-  }
-
-  clear() {
-    this.buckets.clear();
+    if (key) {
+      this.store.delete(key);
+    } else {
+      this.store.clear();
+    }
   }
 }
 

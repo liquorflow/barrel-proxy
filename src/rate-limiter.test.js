@@ -1,61 +1,59 @@
 const { RateLimiter, createRateLimiter } = require('./rate-limiter');
 
-describe('RateLimiter', () => {
-  let limiter;
+test('allows requests under the limit', () => {
+  const limiter = createRateLimiter({ max: 5, windowMs: 60000 });
+  const result = limiter.check('user:1');
+  expect(result.allowed).toBe(true);
+  expect(result.remaining).toBe(4);
+});
 
-  beforeEach(() => {
-    limiter = createRateLimiter({ windowMs: 1000, max: 3 });
-  });
+test('blocks requests over the limit', () => {
+  const limiter = createRateLimiter({ max: 2, windowMs: 60000 });
+  limiter.check('user:1');
+  limiter.check('user:1');
+  const result = limiter.check('user:1');
+  expect(result.allowed).toBe(false);
+  expect(result.remaining).toBe(0);
+});
 
-  afterEach(() => {
-    limiter.clear();
-  });
-
-  it('allows requests under the limit', () => {
-    const result = limiter.hit('127.0.0.1');
-    expect(result.allowed).toBe(true);
-    expect(result.count).toBe(1);
-    expect(result.remaining).toBe(2);
-  });
-
-  it('tracks multiple hits per key', () => {
-    limiter.hit('127.0.0.1');
-    limiter.hit('127.0.0.1');
-    const result = limiter.hit('127.0.0.1');
-    expect(result.allowed).toBe(true);
-    expect(result.remaining).toBe(0);
-  });
-
-  it('blocks requests over the limit', () => {
-    limiter.hit('127.0.0.1');
-    limiter.hit('127.0.0.1');
-    limiter.hit('127.0.0.1');
-    const result = limiter.hit('127.0.0.1');
-    expect(result.allowed).toBe(false);
-    expect(result.count).toBe(4);
-  });
-
-  it('emits limited event when blocked', () => {
-    const spy = jest.fn();
-    limiter.on('limited', spy);
-    limiter.hit('10.0.0.1');
-    limiter.hit('10.0.0.1');
-    limiter.hit('10.0.0.1');
-    limiter.hit('10.0.0.1');
-    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ key: '10.0.0.1' }));
-  });
-
-  it('tracks keys independently', () => {
-    limiter.hit('a'); limiter.hit('a'); limiter.hit('a'); limiter.hit('a');
-    const result = limiter.hit('b');
+test('resets window after windowMs', () => {
+  const limiter = createRateLimiter({ max: 1, windowMs: 1 });
+  limiter.check('user:1');
+  return new Promise(resolve => setTimeout(resolve, 5)).then(() => {
+    const result = limiter.check('user:1');
     expect(result.allowed).toBe(true);
   });
+});
 
-  it('resets a specific key', () => {
-    limiter.hit('x'); limiter.hit('x'); limiter.hit('x'); limiter.hit('x');
-    limiter.reset('x');
-    const result = limiter.hit('x');
-    expect(result.allowed).toBe(true);
-    expect(result.count).toBe(1);
-  });
+test('tracks separate keys independently', () => {
+  const limiter = createRateLimiter({ max: 1, windowMs: 60000 });
+  limiter.check('user:1');
+  const result = limiter.check('user:2');
+  expect(result.allowed).toBe(true);
+});
+
+test('emits exceeded event when limit hit', () => {
+  const limiter = createRateLimiter({ max: 1, windowMs: 60000 });
+  const events = [];
+  limiter.on('exceeded', e => events.push(e));
+  limiter.check('user:1');
+  limiter.check('user:1');
+  expect(events.length).toBe(1);
+  expect(events[0].key).toBe('user:1');
+});
+
+test('reset clears a specific key', () => {
+  const limiter = createRateLimiter({ max: 1, windowMs: 60000 });
+  limiter.check('user:1');
+  limiter.reset('user:1');
+  const result = limiter.check('user:1');
+  expect(result.allowed).toBe(true);
+});
+
+test('getStats returns current store state', () => {
+  const limiter = createRateLimiter({ max: 5, windowMs: 60000 });
+  limiter.check('user:1');
+  limiter.check('user:1');
+  const stats = limiter.getStats();
+  expect(stats['user:1'].count).toBe(2);
 });
