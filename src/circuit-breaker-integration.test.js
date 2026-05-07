@@ -11,13 +11,13 @@ function buildServer(middlewares) {
 }
 
 function get(server, path) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const { port } = server.address();
     http.get(`http://localhost:${port}${path}`, (res) => {
       let body = '';
       res.on('data', (d) => { body += d; });
       res.on('end', () => resolve({ status: res.statusCode, body }));
-    });
+    }).on('error', reject);
   });
 }
 
@@ -50,6 +50,25 @@ describe('circuit breaker integration', () => {
       cb.recordFailure();
       const res = await get(server, '/foo');
       expect(res.status).toBe(503);
+      done();
+    });
+  });
+
+  test('recovers after breaker is reset', (done) => {
+    const mw = createCircuitBreakerMiddleware({ threshold: 2 });
+    server = buildServer([(req, res, next) => {
+      req.matchedService = { name: 'svc2' };
+      next();
+    }, mw]);
+    server.listen(0, async () => {
+      const cb = getBreakerForService({ name: 'svc2' }, { threshold: 2 });
+      cb.recordFailure();
+      cb.recordFailure();
+      const openRes = await get(server, '/foo');
+      expect(openRes.status).toBe(503);
+      cb.reset();
+      const closedRes = await get(server, '/foo');
+      expect(closedRes.status).toBe(200);
       done();
     });
   });
