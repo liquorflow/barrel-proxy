@@ -31,6 +31,21 @@ class AuthGuard extends EventEmitter {
     const params = new URLSearchParams(query);
     return params.get('token') || null;
   }
+
+  /**
+   * Express/Node-style middleware that rejects requests without a valid token.
+   * Responds with 401 and a WWW-Authenticate header when auth fails.
+   */
+  middleware() {
+    return (req, res, next) => {
+      const token = this.extractToken(req);
+      if (this.check(token)) return next();
+      res.setHeader('WWW-Authenticate', `Bearer realm="${this.realm}"`);
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      this.emit('unauthorized', req);
+    };
+  }
 }
 
 function createAuthGuard(options = {}) {
