@@ -3,6 +3,13 @@ const { createWatcher } = require('./watcher');
 /**
  * Bridges file system changes to the LiveReload server.
  * Watches configured service paths and triggers reloads on change.
+ *
+ * @param {Array} services - List of service config objects with optional `watch` paths.
+ * @param {object} liveReloadServer - Server with a `triggerReload(payload)` method.
+ * @param {object} [options] - Optional settings.
+ * @param {Array} [options.ignored] - Glob patterns to ignore in the watcher.
+ * @param {Function} [options.onFileChange] - Callback invoked with the change payload.
+ * @returns {{ watchers: Array, stop: Function }}
  */
 function createReloadBridge(services, liveReloadServer, options = {}) {
   const watchers = [];
