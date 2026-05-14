@@ -15,7 +15,11 @@ const CONFIG_FILES = [
 
 export function loadConfig(configPath = null) {
   if (configPath) {
-    return parseConfig(resolve(process.cwd(), configPath));
+    const fullPath = resolve(process.cwd(), configPath);
+    if (!existsSync(fullPath)) {
+      throw new Error(`Config file not found: ${fullPath}`);
+    }
+    return parseConfig(fullPath);
   }
 
   for (const file of CONFIG_FILES) {
