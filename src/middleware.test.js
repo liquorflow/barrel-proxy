@@ -31,6 +31,14 @@ describe('requestId', () => {
     expect(res.headers['X-Request-Id']).toBe(req.requestId);
     expect(called).toBe(true);
   });
+
+  test('generates unique ids for each request', () => {
+    const req1 = makeMockReq();
+    const req2 = makeMockReq();
+    requestId(req1, makeMockRes(), () => {});
+    requestId(req2, makeMockRes(), () => {});
+    expect(req1.requestId).not.toBe(req2.requestId);
+  });
 });
 
 describe('badGateway', () => {
